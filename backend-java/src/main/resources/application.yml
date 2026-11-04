@@ -1,0 +1,42 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: ragenthub-backend
+  datasource:
+    # 本地默认 H2 嵌入式；生产切 MySQL 时改为：
+    # url: jdbc:mysql://localhost:3306/ragenthub?useSSL=false&serverTimezone=Asia/Shanghai
+    # username: ragenthub
+    # password: ${DB_PASSWORD}
+    url: jdbc:h2:mem:ragenthub;MODE=MySQL;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+  h2:
+    console:
+      enabled: true
+      path: /h2
+
+# Python AI 服务地址
+ai:
+  service:
+    base-url: http://localhost:8000
+
+# 演示账号（生产应走数据库 + BCrypt）
+app:
+  security:
+    user: admin
+    password: admin123
+
+logging:
+  level:
+    com.ragenthub: INFO
+    org.springframework.security: INFO
