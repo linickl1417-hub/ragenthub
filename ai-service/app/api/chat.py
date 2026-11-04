@@ -1,4 +1,4 @@
-"""聊天/问答路由：串起 4 个 Agent"""
+﻿"""Chat route: orchestrates 4-agent pipeline"""
 from __future__ import annotations
 import time
 from fastapi import APIRouter, Depends
@@ -39,6 +39,8 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
             "guard_action": ctx.guard_action,
             "retrieved": ctx.extra.get("retrieved_count", 0),
             "llm_provider": ctx.extra.get("llm_provider", "n/a"),
+            "reflection_rounds": ctx.extra.get("reflection_rounds", 0),
+            "rewritten_query": ctx.extra.get("rewritten_query", None),
         },
         audit_id=ctx.extra.get("audit_id", 0),
         latency_ms=latency,
@@ -47,7 +49,7 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
 
 @router.get("/audit/recent")
 def recent_audits(db: Session = Depends(get_db), limit: int = 20):
-    """最近问答审计（Python 侧视角）"""
+    """Recent audit logs (Python-side view)"""
     rows = (
         db.query(AuditLog)
         .order_by(AuditLog.created_at.desc())

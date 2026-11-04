@@ -31,3 +31,48 @@ data/
 *.sqlite3
 chroma_db/
 secrets/
+
+# 模型文件
+all-MiniLM-L6-v2/
+.docker-cache/
+
+# 模型文件（不进 git）
+all-MiniLM-L6-v2/
+.docker-cache/
+*.tar.gz
+
+# 模型文件（不进 git）
+all-MiniLM-L6-v2/
+.docker-cache/
+*.tar.gz
+
+# Model files (not in git)
+all-MiniLM-L6-v2/
+.docker-cache/
+*.tar.gz
+
+# Model files (not in git)
+all-MiniLM-L6-v2/
+.docker-cache/
+*.tar.gz
+
+# Model files (not in git)
+all-MiniLM-L6-v2/
+.docker-cache/
+*.tar.gz
+
+# Model files (not in git)
+all-MiniLM-L6-v2/
+.docker-cache/
+*.tar.gz
+
+# Model files (not in git)
+all-MiniLM-L6-v2/
+.docker-cache/
+*.tar.gz
+.docker-cache/
+
+# Model files (not in git)
+all-MiniLM-L6-v2/
+.docker-cache/
+*.tar.gz

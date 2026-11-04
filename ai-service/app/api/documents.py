@@ -1,12 +1,12 @@
-"""文档管理路由：上传 + 列表"""
+"""文档管理路由：上传 + 列表；上传后通过事件总线触发切分"""
 from __future__ import annotations
 import tempfile
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from sqlalchemy.orm import Session
-from app.pipelines.ingest import ingest_file
-from app.models.schemas import DocumentIngestResponse
+from app.core.events import get_event_bus
 from app.core.db import get_db, DocumentMeta
+from app.models.schemas import DocumentIngestResponse
 
 router = APIRouter(prefix="/api/v1", tags=["documents"])
 
@@ -24,13 +24,17 @@ async def upload_document(
         tmp.write(await file.read())
         tmp_path = Path(tmp.name)
 
-    n = ingest_file(tmp_path, domain)
-    return DocumentIngestResponse(file=file.filename or "unknown", chunks=n, domain=domain)
+    bus = get_event_bus()
+    result = bus.publish_document_uploaded(str(tmp_path), domain)
+    return DocumentIngestResponse(
+        file=file.filename or "unknown",
+        chunks=result.get("chunks", 0),
+        domain=domain,
+    )
 
 
 @router.get("/documents")
 def list_documents(db: Session = Depends(get_db), domain: str | None = None):
-    """列出已入库的文档元数据"""
     q = db.query(DocumentMeta)
     if domain:
         q = q.filter(DocumentMeta.domain == domain)

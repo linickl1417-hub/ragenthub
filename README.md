@@ -1,4 +1,4 @@
-# RAGentHub — 企业级 RAG 多智能体平台
+# RAGentHub — Enterprise Multi-Agent RAG Platform
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
@@ -9,25 +9,26 @@
 
 > A production-style, multi-agent RAG platform that can be **re-skinned into any domain** — finance, government, healthcare, or internal knowledge base.
 
-RAGentHub 是一个面向求职与工程落地的 **RAG + Agent 后端模板**。它把「文档上传 → 解析切分 → 向量化 → 检索增强 → 多智能体编排 → 安全审计 → 对外 API」整条链路做完整，并通过**配置换装**的方式让同一套代码适配银行、政务、医疗、企业内部知识库等不同业务场景。
+RAGentHub is a **RAG + Agent backend template** built for portfolio and production readiness. It implements the full pipeline: `document upload → parsing & chunking → vectorization → retrieval-augmented generation → multi-agent orchestration → security audit → REST API`, with **config-driven domain switching** so the same codebase adapts to banking, government, healthcare, or internal knowledge base scenarios.
 
 ---
 
-## ✨ 特性
+## ✨ Features
 
-| 能力 | 说明 |
+| Capability | Description |
 |---|---|
-| 🔍 **RAG 流水线** | 文档解析（PDF/MD/TXT）、递归切分、Chroma 向量库、余弦相似度检索 |
-| 🤖 **多智能体编排** | `RetrieverAgent` / `GuardianAgent` / `GeneratorAgent` / `AuditorAgent` 四角色协作 |
-| 🔐 **数据治理 / 安全** | RBAC、文档级 domain 隔离、敏感词正则脱敏（手机/身份证/银行卡）、全量审计日志 |
-| 🧩 **双语言微服务** | Java Spring Boot 3 主服务 + Python FastAPI AI 服务，HTTP 解耦 |
-| 🔄 **多行业换装** | 改 `config/domain.yaml` + 替换 `examples/<domain>/` 语料即可换业务 |
-| 📦 **零依赖本地跑** | 默认 SQLite + Chroma 嵌入式，无需 MySQL / Redis / Kafka；生产配置可一键切到 MySQL + Redis + Kafka |
-| 🧪 **工程质量** | pytest smoke test、Swagger 自动文档、双端审计双写 |
+| 🔍 **RAG Pipeline** | Document parsing (PDF/MD/TXT), recursive chunking, Chroma vector store, cosine similarity retrieval |
+| 🔄 **Retrieval Reflection Loop** | If top-1 relevance score is below threshold, auto-rewrite query (expand synonyms/keywords) and retry — smarter retrieval |
+| 🤖 **Multi-Agent Orchestration** | `RetrieverAgent` / `GuardianAgent` / `GeneratorAgent` / `AuditorAgent` — four-role collaboration |
+| 🔐 **Data Governance / Security** | RBAC, document-level domain isolation, PII regex masking (phone/ID/bank card), full audit log |
+| 🧩 **Dual-Language Microservices** | Java Spring Boot 3 primary service + Python FastAPI AI service, decoupled via HTTP |
+| 🔄 **Multi-Domain Reskinning** | Modify `config/domain.yaml` + replace `examples/<domain>/` corpus to switch business verticals |
+| 📦 **Zero-Dependency Local Run** | Default SQLite + embedded Chroma, no MySQL / Redis / Kafka required; production configs can be switched to MySQL + Redis + Kafka with one env var |
+| 🧪 **Engineering Quality** | pytest smoke tests, auto-generated Swagger docs, dual audit writes across services |
 
 ---
 
-## 🏗 架构
+## 🏗 Architecture
 
 ```mermaid
 flowchart LR
@@ -35,24 +36,25 @@ flowchart LR
     GW -->|HTTP| AI[ai-service<br/>FastAPI + LangChain]
 
     subgraph Agents
-      R[RetrieverAgent] --> G[GuardianAgent<br/>敏感词/越权/拒答]
-      G --> Gen[GeneratorAgent<br/>LLM 生成]
-      Gen --> A[AuditorAgent<br/>落审计]
+      R[RetrieverAgent<br/>vector retrieval] -->|low relevance?| R
+      R -->|high relevance| G[GuardianAgent<br/>PII / deny-topics / refusal]
+      G --> Gen[GeneratorAgent<br/>LLM generation]
+      Gen --> A[AuditorAgent<br/>persist audit log]
     end
 
     AI --> Agents
-    AI --> V[(Chroma<br/>向量库)]
-    AI --> DB[(SQLite / MySQL<br/>业务库)]
+    AI --> V[(Chroma<br/>Vector Store)]
+    AI --> DB[(PostgreSQL<br/>Business DB)]
     AI --> LLM[(LLM Provider<br/>Mock / OpenAI)]
 ```
 
-详见 [docs/architecture.md](docs/architecture.md)。
+See [docs/architecture.md](docs/architecture.md) for details.
 
 ---
 
-## 🚀 快速开始
+## 🚀 Quick Start
 
-### 1. 本地只跑 Python AI 服务（推荐，零外部依赖）
+### 1. Run Python AI Service Only (zero external dependencies)
 
 ```powershell
 cd ai-service
@@ -60,31 +62,42 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 
-# 灌入示例语料
+# Ingest sample corpus
 python -m app.scripts.ingest --domain medical
 
-# 启动
+# Start server
 uvicorn app.main:app --reload --port 8000
 ```
 
-打开 http://localhost:8000 会自动跳到 Swagger（http://localhost:8000/docs），直接发请求。
+Open http://localhost:8000 — it auto-redirects to Swagger (http://localhost:8000/docs).
 
-### 2. 一键启动脚本（Windows）
+### 2. Docker Compose Full Stack
 
 ```powershell
-.\scripts\start-dev.ps1
+# Start all services (PostgreSQL + Redis + Java + Python AI + Web Console)
+docker compose up -d
+
+# Wait ~30 seconds for services to be ready, then visit:
+#   - Python Swagger:  http://localhost:8000/docs
+#   - Java API:        http://localhost:8080  (Basic Auth: admin / admin123)
+#   - Web Console:     http://localhost:8088
 ```
 
-### 3. 启动 Java 主服务（需要 JDK 17 + Maven）
+**China network notes:**
+- Docker Hub requires registry mirrors (configured in `daemon.json`)
+- Maven build requires Aliyun mirror (configured in `settings.xml`)
+- Chroma onnx embedding model auto-downloads on first start (via `hf-mirror.com`)
+
+### 3. Start Java Primary Service (requires JDK 17 + Maven)
 
 ```powershell
 cd backend-java
 mvn spring-boot:run
 ```
 
-Java 服务默认监听 `8080`，Basic Auth 默认 `admin / admin123`，会把 `/api/chat` 透传到 Python 服务 `8000`。
+Java service listens on `8080`, Basic Auth default `admin / admin123`, and proxies `/api/chat` to Python service on `8000`.
 
-### 4. 跑测试
+### 4. Run Tests
 
 ```powershell
 cd ai-service
@@ -94,23 +107,23 @@ pytest tests/ -v
 
 ---
 
-## 🔁 多行业换装示例
+## 🔁 Multi-Domain Reskinning Example
 
-| 行业 | 语料目录 | 典型问题 |
+| Domain | Corpus Directory | Sample Question |
 |---|---|---|
-| 🏦 金融 | `examples/finance/` | "某理财产品的风险等级是什么？" |
-| 🏛 政务 | `examples/gov/` | "事业单位统考报名需要哪些材料？" |
-| 🏥 医疗 | `examples/medical/` | "PCLT20K 数据集用于什么任务？" |
+| 🏦 Finance | `examples/finance/` | "What is the risk rating of product X?" |
+| 🏛 Government | `examples/gov/` | "What documents are required for public institution exam registration?" |
+| 🏥 Healthcare | `examples/medical/` | "What task is the PCLT20K dataset used for?" |
 
-换装只需两步：
+Reskin in two steps:
 
 ```yaml
 # config/domain.yaml
 domain:
-  name: finance           # 切到 finance / gov / medical
-  system_prompt: "你是某银行的合规客服，只回答与产品、流程相关的问题。"
+  name: finance           # switch to finance / gov / medical
+  system_prompt: "You are a compliance support agent for a bank. Only answer product and process questions."
   guardrails:
-    deny_topics: ["股价预测", "内幕消息"]
+    deny_topics: ["stock_price", "insider_info", "guaranteed_return", "medication", "diagnosis", "prescription"]
 ```
 
 ```powershell
@@ -119,69 +132,69 @@ python -m app.scripts.ingest --domain finance
 
 ---
 
-## 📚 API 示例
+## 📚 API Examples
 
 ```bash
-# 提问（走完整 RAG + Agent 链路）
+# Ask a question (full RAG + Agent pipeline)
 curl -X POST http://localhost:8000/api/v1/chat \
   -H "Content-Type: application/json" \
-  -d '{"question": "什么是定期存款？", "domain": "finance"}'
+  -d '{"question": "What is a fixed deposit?", "domain": "finance"}'
 
-# 上传文档
+# Upload a document
 curl -X POST http://localhost:8000/api/v1/documents \
-  -F "file=@examples/finance/产品手册.md" \
+  -F "file=@examples/finance/product-brochure.md" \
   -F "domain=finance"
 
-# 最近审计
+# Recent audit logs
 curl http://localhost:8000/api/v1/audit/recent
 ```
 
-完整接口列表见 [docs/api.md](docs/api.md)。
+See [docs/api.md](docs/api.md) for full API reference.
 
 ---
 
-## 📁 目录结构
+## 📁 Project Structure
 
 ```
 RAGentHub/
 ├── README.md
 ├── LICENSE
 ├── docs/
-│   ├── architecture.md      # 架构设计
-│   ├── api.md                # API 文档
-│   └── github-push.md        # 推 GitHub 步骤
-├── backend-java/             # Spring Boot 3 主服务
+│   ├── architecture.md      # Architecture design
+│   ├── api.md                # API documentation
+│   └── github-push.md        # GitHub push guide
+├── backend-java/             # Spring Boot 3 primary service
 │   ├── pom.xml
 │   └── src/main/
-├── ai-service/               # FastAPI + LangChain AI 服务
+├── ai-service/               # FastAPI + LangChain AI service
 │   ├── requirements.txt
 │   ├── requirements-dev.txt
 │   ├── tests/
 │   └── app/
-├── web/                      # 极简前端（HTML + Fetch）
-├── examples/                 # 多行业示例语料
+├── web/                      # Minimal frontend (HTML + Fetch)
+├── examples/                 # Multi-domain sample corpus
 │   ├── finance/
 │   ├── gov/
 │   └── medical/
 ├── config/
-│   └── domain.yaml           # 行业换装配置
+│   └── domain.yaml           # Domain reskin config
 ├── scripts/
 │   └── start-dev.ps1
-└── data/                     # 本地 SQLite / Chroma 数据（gitignore）
+└── data/                     # Local SQLite / Chroma data (gitignored)
 ```
 
 ---
 
-## 🗺 路线图
+## 🗺 Roadmap
 
-- [x] Python RAG MVP + 多 Agent 骨架
-- [x] Java Spring Boot 主服务骨架
-- [x] pytest smoke test
-- [ ] 接入 PostgreSQL / pgvector
-- [ ] 接入 Redis 缓存 + Kafka 异步切分
-- [ ] 前端知识库管理台（Vue/React）
-- [ ] Docker / docker-compose 一键部署
-- [ ] RAGAS 评估脚本
+- [x] Python RAG MVP + multi-agent skeleton
+- [x] Java Spring Boot primary service skeleton
+- [x] pytest smoke tests
+- [x] PostgreSQL / pgvector abstraction (`VECTOR_BACKEND=pgvector` toggle)
+- [x] Redis cache + Kafka async chunking (`CACHE_BACKEND=redis` / `EVENT_BUS=kafka`)
+- [x] React + Vite knowledge base console (`web-console/`)
+- [x] Docker / docker-compose one-click deployment (PG + pgvector + Redis + Kafka + AI + Java + Web)
+- [x] RAGAS evaluation script (`ai-service/evals/eval_ragas.py`)
 
 ---
 

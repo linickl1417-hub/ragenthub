@@ -1,0 +1,92 @@
+# RAGentHub 一键部署：
+#   docker compose up -d                  # 核心服务（PG + Redis + AI + Java + Web）
+#   docker compose --profile kafka up -d  # 额外起 Kafka
+#
+# 访问：
+#   ai-service:   http://localhost:8000/docs
+#   backend-java: http://localhost:8080/api/health  (admin/admin123)
+#   web-console:  http://localhost:8088
+
+services:
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ragenthub
+      POSTGRES_PASSWORD: ragenthub
+      POSTGRES_DB: ragenthub
+    ports: ["5432:5432"]
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./scripts/init_pgvector.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ragenthub"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+
+  kafka:
+    image: apache/kafka:3.7.2
+    profiles: ["kafka"]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: controller,broker
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+    ports: ["9092:9092"]
+
+  ai-service:
+    build:
+      context: .
+      dockerfile: ai-service/Dockerfile
+    environment:
+      DB_BACKEND: postgres
+      DATABASE_URL: postgresql+psycopg://ragenthub:ragenthub@postgres:5432/ragenthub
+      VECTOR_BACKEND: chroma
+      CACHE_BACKEND: redis
+      REDIS_URL: redis://redis:6379/0
+      EVENT_BUS: sync
+      KAFKA_BOOTSTRAP: kafka:9092
+      HF_ENDPOINT: https://hf-mirror.com
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-ollama}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://host.docker.internal:11434/v1}
+      OPENAI_MODEL: ${OPENAI_MODEL:-llama3}
+    ports: ["8000:8000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
+  backend-java:
+    build: ./backend-java
+    environment:
+      AI_SERVICE_BASE_URL: http://ai-service:8000
+    ports: ["8080:8080"]
+    depends_on:
+      ai-service: { condition: service_started }
+
+  web-console:
+    build: ./web-console
+    ports: ["8088:80"]
+    depends_on:
+      - ai-service
+
+volumes:
+  pg_data:

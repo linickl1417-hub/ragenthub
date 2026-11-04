@@ -1,47 +1,61 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
 <title>RAGentHub Demo</title>
 <style>
+  * { box-sizing: border-box; }
   body { font-family: -apple-system, "Segoe UI", sans-serif; max-width: 860px; margin: 40px auto; padding: 0 20px; background: #f7f8fa; color: #222; }
   h1 { color: #2b6cb0; margin-bottom: 4px; }
   .sub { color: #718096; margin-top: 0; font-size: 13px; }
   .row { margin: 12px 0; }
-  label { font-size: 13px; color: #4a5568; }
-  select, input, textarea { width: 100%; padding: 10px; font-size: 14px; border: 1px solid #cbd5e0; border-radius: 6px; box-sizing: border-box; }
+  label { font-size: 13px; color: #4a5568; font-weight: 600; }
+  select, input, textarea { width: 100%; padding: 10px; font-size: 14px; border: 1px solid #cbd5e0; border-radius: 6px; box-sizing: border-box; margin-top: 4px; }
   button { background: #2b6cb0; color: #fff; border: 0; padding: 10px 24px; border-radius: 6px; cursor: pointer; font-size: 14px; }
-  button:disabled { background: #a0aec0; }
+  button:disabled { background: #a0aec0; cursor: not-allowed; }
   #answer { white-space: pre-wrap; background: #fff; padding: 16px; border-radius: 6px; margin-top: 16px; border: 1px solid #e2e8f0; line-height: 1.6; }
   #citations { margin-top: 12px; background: #ebf8ff; border-left: 3px solid #2b6cb0; padding: 10px 14px; border-radius: 4px; font-size: 13px; }
-  #citations .src { color: #2b6cb0; font-weight: 600; }
-  #trace { font-size: 12px; color: #718096; margin-top: 10px; }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; margin-right: 6px; }
+  #citations .src { color: #2b6cb0; font-weight: 600; margin-top: 4px; }
+  #citations .score { color: #718096; font-weight: normal; }
+  #trace { font-size: 12px; color: #718096; margin-top: 10px; padding: 8px 12px; background: #edf2f7; border-radius: 4px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; margin-right: 6px; font-weight: 600; }
   .badge.pass { background: #c6f6d5; color: #22543d; }
   .badge.denied { background: #fed7d7; color: #742a2a; }
+  .badge.reflection { background: #fefcbf; color: #744210; }
+  .reflection-box { margin-top: 8px; padding: 8px; background: #fffff0; border: 1px dashed #ecc94b; border-radius: 4px; font-size: 12px; }
+  .reflection-box .label { color: #975a16; font-weight: 600; }
+  .feature-tags { margin-top: 20px; padding-top: 16px; border-top: 1px solid #e2e8f0; font-size: 12px; color: #718096; }
+  .feature-tags span { display: inline-block; margin-right: 12px; }
 </style>
 </head>
 <body>
-  <h1>RAGentHub 演示台</h1>
-  <p class="sub">Retriever → Guardian → Generator → Auditor 四智能体 RAG 链路</p>
+  <h1>RAGentHub</h1>
+  <p class="sub">Enterprise Multi-Agent RAG Platform — Retriever → Guardian → Generator → Auditor</p>
 
   <div class="row">
-    <label>行业 domain</label>
+    <label>Domain</label>
     <select id="domain">
-      <option value="medical">medical（医学文献）</option>
-      <option value="finance">finance（金融合规）</option>
-      <option value="gov">gov（政务办事）</option>
+      <option value="medical">Medical (Medical Literature)</option>
+      <option value="finance">Finance (Compliance)</option>
+      <option value="gov">Government (Public Services)</option>
     </select>
   </div>
   <div class="row">
-    <label>问题</label>
-    <textarea id="q" rows="3">PCLT20K 数据集用于什么任务？</textarea>
+    <label>Your Question</label>
+    <textarea id="q" rows="3">What task is the PCLT20K dataset used for?</textarea>
   </div>
-  <div class="row"><button id="btn" onclick="ask()">提问</button></div>
+  <div class="row"><button id="btn" onclick="ask()">Ask Question</button></div>
 
   <div id="answer" style="display:none"></div>
   <div id="citations" style="display:none"></div>
   <div id="trace"></div>
+
+  <div class="feature-tags">
+    <span>🔍 Retrieval Reflection Loop</span>
+    <span>🔄 Multi-Domain Reskinning</span>
+    <span>🔐 Full Audit Logging</span>
+    <span>🤖 4-Agent Pipeline</span>
+  </div>
 
 <script>
 const API = 'http://localhost:8000';
@@ -52,12 +66,13 @@ async function ask() {
   if (!q) return;
 
   const btn = document.getElementById('btn');
-  btn.disabled = true; btn.textContent = '思考中…';
+  btn.disabled = true; btn.textContent = 'Thinking...';
 
   const box = document.getElementById('answer');
   const cit = document.getElementById('citations');
-  box.style.display = 'block'; box.textContent = '思考中…';
+  box.style.display = 'block'; box.textContent = 'Thinking...';
   cit.style.display = 'none';
+  document.getElementById('trace').innerHTML = '';
 
   try {
     const r = await fetch(API + '/api/v1/chat', {
@@ -70,20 +85,27 @@ async function ask() {
 
     if (data.citations && data.citations.length) {
       cit.style.display = 'block';
-      cit.innerHTML = '<b>引用来源</b>：' + data.citations.map(c =>
-        `<div class="src">${c.source} <span style="color:#718096;font-weight:normal">相似度 ${c.score}</span></div>`
+      cit.innerHTML = '<b>Citations</b>:' + data.citations.map(c =>
+        `<div class="src">${c.source} <span class="score">similarity: ${c.score}</span></div>`
       ).join('');
     }
 
-    const ga = data.agent_trace.guard_action;
-    document.getElementById('trace').innerHTML =
-      `<span class="badge ${ga === 'pass' ? 'pass' : 'denied'}">guard: ${ga}</span>` +
-      `耗时 ${data.latency_ms}ms · 检索 ${data.agent_trace.retrieved} 条 · ` +
-      `llm=${data.agent_trace.llm_provider} · audit#${data.audit_id}`;
+    const trace = data.agent_trace;
+    let traceHtml = `<span class="badge ${trace.guard_action === 'pass' ? 'pass' : 'denied'}">guard: ${trace.guard_action}</span>`;
+    traceHtml += ` ${data.latency_ms}ms · retrieved: ${trace.retrieved} chunks · llm=${trace.llm_provider} · audit#${data.audit_id}`;
+
+    if (trace.reflection_rounds > 0) {
+      traceHtml += `<div class="reflection-box">
+        <span class="label">🔄 Reflection Loop Triggered (rounds: ${trace.reflection_rounds})</span><br/>
+        Rewritten query: "${trace.rewritten_query}"
+      </div>`;
+    }
+
+    document.getElementById('trace').innerHTML = traceHtml;
   } catch (e) {
-    box.textContent = '请求失败：' + e.message + '\n请确认 Python 服务在 8000 端口运行。';
+    box.textContent = 'Request failed: ' + e.message + '\nPlease make sure the Python service is running on port 8000.';
   } finally {
-    btn.disabled = false; btn.textContent = '提问';
+    btn.disabled = false; btn.textContent = 'Ask Question';
   }
 }
 </script>

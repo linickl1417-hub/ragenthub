@@ -1,0 +1,5 @@
+{"question": "PCLT20K 数据集是什么任务的数据集？", "ground_truth": "肝脏组织病理图像分割，跨膜态标注，约20000张图像。"}
+{"question": "MedSegDiff 是什么类型的模型？", "ground_truth": "基于扩散模型的医学图像分割方法。"}
+{"question": "SegFormer 的核心特点是什么？", "ground_truth": "Transformer 编码器加轻量解码器，无需位置编码。"}
+{"question": "PCRF 是什么模块？", "ground_truth": "PET/CT 互补可靠性融合，对多模态特征按可靠性加权融合。"}
+{"question": "U-Net 的典型结构是什么？", "ground_truth": "编码器-解码器加跳跃连接。"}

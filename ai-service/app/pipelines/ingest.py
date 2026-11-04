@@ -47,12 +47,14 @@ def ingest_file(path: Path, domain: str, chunk_size: int = 500, overlap: int = 8
 
     n = upsert_chunks(domain, chunks)
 
-    # 写元数据
+    # 写元数据（按 filename+domain 幂等 upsert：先删旧记录再插新）
     db = SessionLocal()
     try:
-        db.merge(DocumentMeta(
-            filename=path.name, domain=domain, chunk_count=n,
-        ))
+        db.query(DocumentMeta).filter(
+            DocumentMeta.filename == path.name,
+            DocumentMeta.domain == domain,
+        ).delete()
+        db.add(DocumentMeta(filename=path.name, domain=domain, chunk_count=n))
         db.commit()
     finally:
         db.close()
