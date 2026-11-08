@@ -20,11 +20,13 @@ RAGentHub is a **RAG + Agent backend template** built for portfolio and producti
 | 🔍 **RAG Pipeline** | Document parsing (PDF/MD/TXT), recursive chunking, Chroma vector store, cosine similarity retrieval |
 | 🔄 **Retrieval Reflection Loop** | If top-1 relevance score is below threshold, auto-rewrite query (expand synonyms/keywords) and retry — smarter retrieval |
 | 🤖 **Multi-Agent Orchestration** | `RetrieverAgent` / `GuardianAgent` / `GeneratorAgent` / `AuditorAgent` — four-role collaboration |
+| 🧭 **Runtime Domain Management** | Create, update and delete domains from the console — persisted in PostgreSQL, no redeploy needed |
+| 💬 **Persistent Conversations** | Per-user, per-domain chat history stored in the database and restored on reload |
 | 🔐 **Data Governance / Security** | RBAC, document-level domain isolation, PII regex masking (phone/ID/bank card), full audit log |
 | 🧩 **Dual-Language Microservices** | Java Spring Boot 3 primary service + Python FastAPI AI service, decoupled via HTTP |
-| 🔄 **Multi-Domain Reskinning** | Modify `config/domain.yaml` + replace `examples/<domain>/` corpus to switch business verticals |
-| 📦 **Zero-Dependency Local Run** | Default SQLite + embedded Chroma, no MySQL / Redis / Kafka required; production configs can be switched to MySQL + Redis + Kafka with one env var |
-| 🧪 **Engineering Quality** | pytest smoke tests, auto-generated Swagger docs, dual audit writes across services |
+| 📦 **Zero-Dependency Local Run** | Default SQLite + embedded Chroma, no MySQL / Redis / Kafka required; production configs can be switched to PostgreSQL + Redis + Kafka with one env var |
+| 🗄 **Durable Storage** | Chroma vectors live on a named volume, ONNX embedding cache is seeded from a local model mount — data survives container recreation |
+| 🧪 **Engineering Quality** | 13 pytest contract tests, Swagger docs, structured logging, unified error responses, GitHub Actions CI |
 
 ---
 
@@ -32,11 +34,12 @@ RAGentHub is a **RAG + Agent backend template** built for portfolio and producti
 
 ```mermaid
 flowchart LR
-    U[Web / Open API] --> GW[backend-java<br/>Spring Boot 3 + Security]
+    U[Web Console / Open API] --> GW[backend-java<br/>Spring Boot 3 + Security]
     GW -->|HTTP| AI[ai-service<br/>FastAPI + LangChain]
+    U -->|chat · upload · domains| AI
 
     subgraph Agents
-      R[RetrieverAgent<br/>vector retrieval] -->|low relevance?| R
+      R[RetrieverAgent<br/>vector retrieval] -->|low relevance?<br/>rewrite + retry| R
       R -->|high relevance| G[GuardianAgent<br/>PII / deny-topics / refusal]
       G --> Gen[GeneratorAgent<br/>LLM generation]
       Gen --> A[AuditorAgent<br/>persist audit log]
@@ -44,8 +47,8 @@ flowchart LR
 
     AI --> Agents
     AI --> V[(Chroma<br/>Vector Store)]
-    AI --> DB[(PostgreSQL<br/>Business DB)]
-    AI --> LLM[(LLM Provider<br/>Mock / OpenAI)]
+    AI --> DB[(PostgreSQL<br/>audit_log · document_meta<br/>domain_config · chat_history)]
+    AI --> LLM[(LLM Provider<br/>Mock / OpenAI-compatible)]
 ```
 
 See [docs/architecture.md](docs/architecture.md) for details.
@@ -86,7 +89,17 @@ docker compose up -d
 **China network notes:**
 - Docker Hub requires registry mirrors (configured in `daemon.json`)
 - Maven build requires Aliyun mirror (configured in `settings.xml`)
-- Chroma onnx embedding model auto-downloads on first start (via `hf-mirror.com`)
+- The ONNX embedding model is **not downloaded at runtime** — the local
+  `all-MiniLM-L6-v2/` directory is mounted read-only into the container and the
+  entrypoint seeds the Chroma cache from it, so first boot works fully offline
+
+**Data persistence:**
+
+| Volume | Mount | Purpose |
+|---|---|---|
+| `pg_data` | `/var/lib/postgresql/data` | PostgreSQL data |
+| `ai_data` | `/data` | Chroma vector store |
+| `onnx_cache` | `/root/.cache/chroma/onnx_models` | Embedding model cache |
 
 ### 3. Start Java Primary Service (requires JDK 17 + Maven)
 

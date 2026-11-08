@@ -1,10 +1,11 @@
 ﻿"""Chat route: orchestrates 4-agent pipeline"""
 from __future__ import annotations
+import json
 import time
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.config import load_domain_config
-from app.core.db import get_db, AuditLog
+from app.core.db import get_db, AuditLog, ChatHistory
 from app.models.schemas import ChatRequest, ChatResponse, RetrievedChunk
 from app.agents.base import AgentContext
 from app.agents.retriever import RetrieverAgent
@@ -31,6 +32,21 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
     latency = int((time.time() - t0) * 1000)
     ctx.extra["latency_ms"] = latency
     ctx = AuditorAgent(db).run(ctx)
+
+    # Save chat history (user question + assistant answer)
+    user_msg = ChatHistory(
+        user_id=req.user_id, domain=req.domain,
+        role="user", content=req.question,
+    )
+    assistant_msg = ChatHistory(
+        user_id=req.user_id, domain=req.domain,
+        role="assistant", content=ctx.answer,
+        citations=json.dumps([{"source": c["source"], "score": c["score"]} for c in ctx.retrieved]),
+        reflection_rounds=ctx.extra.get("reflection_rounds", 0),
+    )
+    db.add(user_msg)
+    db.add(assistant_msg)
+    db.commit()
 
     return ChatResponse(
         answer=ctx.answer,

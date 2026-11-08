@@ -47,6 +47,18 @@ class _ChromaAdapter:
             })
         return out
 
+    def delete_by_source(self, source: str) -> int:
+        """Delete all chunks belonging to one document (matched by source filename)."""
+        existing = self._col.get(where={"source": source})
+        ids = existing.get("ids", [])
+        if not ids:
+            return 0
+        self._col.delete(ids=ids)
+        return len(ids)
+
+    def count(self) -> int:
+        return self._col.count()
+
 
 # ---------- 对外函数 ----------
 def upsert_chunks(domain: str, chunks: list[dict]) -> int:
@@ -55,3 +67,12 @@ def upsert_chunks(domain: str, chunks: list[dict]) -> int:
 
 def query(domain: str, question: str, top_k: int = 5) -> list[dict]:
     return get_collection(domain).query(question, top_k=top_k)
+
+
+def delete_document_chunks(domain: str, source: str) -> int:
+    """Remove every chunk of a document from the vector store."""
+    return get_collection(domain).delete_by_source(source)
+
+
+def count_chunks(domain: str) -> int:
+    return get_collection(domain).count()

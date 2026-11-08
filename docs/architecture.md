@@ -66,16 +66,45 @@ When top-1 retrieval similarity drops below 0.35, the RetrieverAgent automatical
 | Async Chunking | Sync | Kafka (document upload → event → worker consumes, switch `EVENT_BUS=kafka`) |
 | LLM | Mock / Ollama local | OpenAI / Qwen / DeepSeek (switch `LLM_PROVIDER=openai`) |
 
+## 5.1 Persistence and Offline Model Bootstrap
+
+Container recreation must not lose data, and cold starts must not depend on
+network access to the model CDN.
+
+| Volume | Mount point | Holds |
+|---|---|---|
+| `pg_data` | `/var/lib/postgresql/data` | PostgreSQL business data (`audit_log`, `document_meta`, `domain_config`, `chat_history`) |
+| `ai_data` | `/data` | Chroma persistent vector store (`RAGENTHUB_DATA_DIR=/data`) |
+| `onnx_cache` | `/root/.cache/chroma/onnx_models` | ONNX embedding model cache |
+| host bind (ro) | `/models/minilm` | Local `all-MiniLM-L6-v2` directory |
+
+`ai-service/docker-entrypoint.sh` runs before the service starts. Chroma only
+treats the embedding model as installed when **all six** files
+(`config.json`, `model.onnx`, `special_tokens_map.json`, `tokenizer_config.json`,
+`tokenizer.json`, `vocab.txt`) are present under
+`all-MiniLM-L6-v2/onnx/`. The entrypoint copies them from the read-only bind
+mount, deletes any partially downloaded archive, and only then lets the
+process start — so the ingest worker and the HTTP worker never race on the
+same download.
+
 ## 6. Directory Structure
 
 ```
 RAGentHub/
-├── backend-java/          # Spring Boot 3 primary service
-├── ai-service/            # FastAPI + LangChain AI service
-├── web-console/           # React + Vite management console
+├── backend-java/               # Spring Boot 3 primary service
+├── ai-service/
+│   ├── app/
+│   │   ├── agents/             # Retriever / Guardian / Generator / Auditor
+│   │   ├── api/                # chat, documents, domains, history, audit
+│   │   └── core/               # db, vectorstore, cache, llm
+│   ├── tests/                  # pytest contract tests
+│   └── docker-entrypoint.sh    # ONNX cache seeding
+├── web-console/                # React + Vite management console
+├── web/                        # Built-in chat + admin SPA served by ai-service
 ├── config/
-│   └── domain.yaml        # Multi-domain reskin config
-├── examples/               # Sample corpus (finance/gov/medical)
-├── docs/                   # Documentation
-└── scripts/                # Dev helper scripts
+│   └── domain.yaml             # Multi-domain reskin config
+├── examples/                   # Sample corpus (finance/gov/medical)
+├── docs/                       # Documentation
+└── scripts/                    # Dev helper scripts (e2e smoke, evaluation)
 ```
+

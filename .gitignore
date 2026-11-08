@@ -1,78 +1,39 @@
-# Python
+# ---------- Python ----------
 __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
 venv/
-.env
+.pytest_cache/
+.pytest_data/
+*.sqlite
+*.sqlite3
 
-# Java
+# ---------- Java ----------
 target/
 *.class
 *.jar
 !.mvn/wrapper/*.jar
 
-# Node
+# ---------- Node ----------
 node_modules/
 dist/
 
-# IDE
+# ---------- Local data / secrets ----------
+data/
+chroma_db/
+secrets/
+.env
+
+# ---------- Model files (mounted into the container, never committed) ----------
+all-MiniLM-L6-v2/
+.docker-cache/
+*.tar.gz
+*.onnx
+
+# ---------- IDE / OS ----------
 .idea/
 .vscode/
 *.iml
-
-# OS
 .DS_Store
 Thumbs.db
-
-# 鏈湴鏁版嵁 / 瀵嗛挜
-data/
-*.sqlite
-*.sqlite3
-chroma_db/
-secrets/
-
-# 模型文件
-all-MiniLM-L6-v2/
-.docker-cache/
-
-# 模型文件（不进 git）
-all-MiniLM-L6-v2/
-.docker-cache/
-*.tar.gz
-
-# 模型文件（不进 git）
-all-MiniLM-L6-v2/
-.docker-cache/
-*.tar.gz
-
-# Model files (not in git)
-all-MiniLM-L6-v2/
-.docker-cache/
-*.tar.gz
-
-# Model files (not in git)
-all-MiniLM-L6-v2/
-.docker-cache/
-*.tar.gz
-
-# Model files (not in git)
-all-MiniLM-L6-v2/
-.docker-cache/
-*.tar.gz
-
-# Model files (not in git)
-all-MiniLM-L6-v2/
-.docker-cache/
-*.tar.gz
-
-# Model files (not in git)
-all-MiniLM-L6-v2/
-.docker-cache/
-*.tar.gz
-.docker-cache/
-
-# Model files (not in git)
-all-MiniLM-L6-v2/
-.docker-cache/
-*.tar.gz

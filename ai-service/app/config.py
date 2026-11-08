@@ -17,10 +17,10 @@ class Settings(BaseSettings):
     app_name: str = "RAGentHub AI Service"
     env: str = os.getenv("ENV", "dev")
 
-    # 数据路径
-    data_dir: Path = ROOT / "data"
-    sqlite_path: Path = ROOT / "data" / "ragenthub.sqlite3"
-    chroma_dir: Path = ROOT / "data" / "chroma"
+    # 数据路径（RAGENTHUB_DATA_DIR 可覆盖，便于测试与多环境隔离）
+    data_dir: Path = Path(os.getenv("RAGENTHUB_DATA_DIR", str(ROOT / "data")))
+    sqlite_path: Path = data_dir / "ragenthub.sqlite3"
+    chroma_dir: Path = data_dir / "chroma"
 
     # 业务库：sqlite | mysql | postgres
     db_backend: str = os.getenv("DB_BACKEND", "sqlite")
@@ -55,6 +55,22 @@ def load_domain_config(domain: str = "medical") -> dict:
         cfg = yaml.safe_load(f)
     defaults = cfg.get("defaults", {})
     domains = cfg.get("domains", {})
+
+    # Check custom domains from DB
+    import json
+    from app.core.db import SessionLocal, DomainConfig
+    db = SessionLocal()
+    try:
+        d = db.query(DomainConfig).filter(DomainConfig.domain_id == domain).first()
+        if d:
+            merged = {**defaults}
+            merged["system_prompt"] = d.system_prompt
+            merged["deny_topics"] = json.loads(d.deny_topics)
+            merged["corpus_dir"] = str(ROOT / f"examples/{domain}")
+            return merged
+    finally:
+        db.close()
+
     if domain not in domains:
         raise ValueError(f"未知 domain: {domain}，可选: {list(domains.keys())}")
     merged = {**defaults, **domains[domain]}

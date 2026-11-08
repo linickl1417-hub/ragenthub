@@ -65,14 +65,22 @@ services:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://host.docker.internal:11434/v1}
       OPENAI_MODEL: ${OPENAI_MODEL:-llama3}
     ports: ["8000:8000"]
+    volumes:
+      # Chroma 向量库 + 业务数据持久化（容器重建不丢）
+      - ai_data:/data
+      # 本地 ONNX embedding 模型（只读挂载，容器离线可用）
+      - ./all-MiniLM-L6-v2:/models/minilm:ro
+      # ONNX 模型缓存（首次由 entrypoint 播种，之后复用）
+      - onnx_cache:/root/.cache/chroma/onnx_models
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
       timeout: 5s
       retries: 15
+      start_period: 40s
 
   backend-java:
     build: ./backend-java
@@ -80,7 +88,7 @@ services:
       AI_SERVICE_BASE_URL: http://ai-service:8000
     ports: ["8080:8080"]
     depends_on:
-      ai-service: { condition: service_started }
+      ai-service: { condition: service_healthy }
 
   web-console:
     build: ./web-console
@@ -90,3 +98,5 @@ services:
 
 volumes:
   pg_data:
+  ai_data:
+  onnx_cache:

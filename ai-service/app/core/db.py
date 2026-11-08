@@ -1,9 +1,14 @@
 """SQLAlchemy 引擎：根据 DB_BACKEND 切换 sqlite / mysql / postgres"""
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, Text, DateTime, create_engine, UniqueConstraint
 from sqlalchemy.orm import declarative_base, sessionmaker
 from app.config import settings
+
+
+def utcnow() -> datetime:
+    """Timezone-aware UTC now, stored naive for cross-database compatibility."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 if settings.db_backend == "sqlite":
     url = f"sqlite:///{settings.sqlite_path}"
@@ -28,7 +33,7 @@ class DocumentMeta(Base):
     filename = Column(String(256), index=True)
     domain = Column(String(64), index=True)
     chunk_count = Column(Integer, default=0)
-    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    uploaded_at = Column(DateTime, default=utcnow)
 
 
 class AuditLog(Base):
@@ -41,7 +46,33 @@ class AuditLog(Base):
     citations = Column(Text)
     guard_action = Column(String(32))
     latency_ms = Column(Integer)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=utcnow, index=True)
+
+
+class DomainConfig(Base):
+    """Custom domain configuration (user-created domains)"""
+    __tablename__ = "domain_config"
+    __table_args__ = (UniqueConstraint("domain_id", name="uq_domain_id"),)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    domain_id = Column(String(64), index=True)
+    name = Column(String(128))
+    system_prompt = Column(Text, default="")
+    deny_topics = Column(Text, default="[]")  # JSON array
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class ChatHistory(Base):
+    """Chat history per user per domain"""
+    __tablename__ = "chat_history"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(64), index=True)
+    domain = Column(String(64), index=True)
+    role = Column(String(16))  # user / assistant
+    content = Column(Text)
+    citations = Column(Text, default="[]")  # JSON array
+    reflection_rounds = Column(Integer, default=0)
+    created_at = Column(DateTime, default=utcnow, index=True)
 
 
 def init_db():
