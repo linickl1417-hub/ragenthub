@@ -7,6 +7,43 @@ Swagger UI: http://localhost:8000/docs
 
 ---
 
+## 0. Authentication and Rate Limiting
+
+### API key
+
+Every `/api/v1/*` endpoint requires an API key when `API_KEY` is configured.
+Send it as `X-API-Key` or as a bearer token:
+
+```
+X-API-Key: <your key>
+Authorization: Bearer <your key>
+```
+
+Missing/invalid key → `401`:
+
+```json
+{ "detail": "Invalid or missing API key" }
+```
+
+`/health`, `/docs`, `/redoc`, `/openapi.json` and `/web` never require a key.
+When `API_KEY` is empty the service runs in development mode with no
+authentication — `/health` reports `"auth": "disabled"` in that case.
+
+### Rate limiting
+
+`RATE_LIMIT_PER_MINUTE` (default `120`, `0` disables) caps requests per API
+key (or per client IP when unauthenticated) in a fixed one-minute window.
+The counter lives in the shared cache, so with `CACHE_BACKEND=redis` the
+budget is enforced across replicas.
+
+Over budget → `429` with `Retry-After`:
+
+```json
+{ "error": "rate_limit_exceeded", "detail": "Too many requests, retry in 37s" }
+```
+
+---
+
 ## 1. POST `/api/v1/chat`
 
 Main Q&A endpoint — runs the full 4-agent pipeline (Retriever → Guardian → Generator → Auditor).
@@ -24,14 +61,14 @@ Main Q&A endpoint — runs the full 4-agent pipeline (Retriever → Guardian →
 | Field | Type | Required | Description |
 |---|---|---|---|
 | question | string | Yes | User's question |
-| domain | string | Yes | Domain name: `finance` / `gov` / `medical` |
-| user_id | string | Yes | User identifier for audit |
+| domain | string | Yes | Domain name: `finance` / `gov` / `medical` / any custom domain |
+| user_id | string | Yes | User identifier for audit and conversation context |
 
 ### Response
 
 ```json
 {
-  "answer": "Based on 2 retrieved chunks (Mock mode)...",
+  "answer": "PCLT20K is used for liver pathology image segmentation.",
   "citations": [
     {
       "content": "PCLF (PET/CT Reliability Fusion)...",
@@ -42,10 +79,13 @@ Main Q&A endpoint — runs the full 4-agent pipeline (Retriever → Guardian →
   "agent_trace": {
     "guard_action": "pass",
     "retrieved": 2,
-    "llm_provider": "mock",
-    "reflection_rounds": 0,
-    "rewritten_query": null,
-    "top_score": 0.8234
+    "llm_provider": "openai",
+    "reflection_rounds": 1,
+    "rewritten_query": "What is the PCLT20K dataset used for? define explain",
+    "top_score": 0.8234,
+    "context_turns": 2,
+    "contextualized_query": "PCLT20K 数据集 它用于什么任务",
+    "cache_hit": false
   },
   "audit_id": 12,
   "latency_ms": 230
@@ -58,10 +98,22 @@ Main Q&A endpoint — runs the full 4-agent pipeline (Retriever → Guardian →
 |---|---|
 | `guard_action` | `pass` / `denied` — whether GuardianAgent blocked the question |
 | `retrieved` | Number of chunks retrieved by RetrieverAgent |
-| `llm_provider` | Which LLM was used: `mock` / `openai` |
+| `llm_provider` | `mock` / `openai` / `mock(fallback)` when the LLM call failed |
 | `reflection_rounds` | Number of reflection loop rounds (0 = no reflection triggered) |
 | `rewritten_query` | The rewritten query if reflection was triggered, otherwise `null` |
 | `top_score` | Cosine similarity of the top-1 retrieved chunk |
+| `context_turns` | Previous user turns injected into the prompt (0 = first question) |
+| `contextualized_query` | Retrieval query after folding in the previous turn, `null` when unused |
+| `cache_hit` | Whether the retrieval result came from the embedding cache |
+
+### Multi-turn behaviour
+
+The last `CHAT_CONTEXT_TURNS` (default `3`) exchanges for this
+`user_id` + `domain` are loaded from `chat_history` and sent to the LLM as
+proper `user`/`assistant` messages, so follow-ups work without repeating
+context. Short pronoun-style follow-ups (`它是什么`, `this one?`) are expanded
+with the previous question **before retrieval** and surfaced as
+`contextualized_query`.
 
 ---
 
@@ -103,6 +155,11 @@ List ingested documents, optionally filtered by domain.
 | Param | Type | Default | Description |
 |---|---|---|---|
 | domain | string | — | Filter by domain |
+| limit | int | 100 | Page size, 1–500 |
+| offset | int | 0 | Rows to skip |
+
+The total number of matching rows is returned in the `X-Total-Count` response
+header, so a client can paginate without a second query.
 
 ### Response
 
@@ -188,13 +245,14 @@ Delete a custom domain.
 
 ### GET `/api/v1/chat/history`
 
-Read the conversation history for one user in one domain — used by the web console to restore sessions after reload.
+Read the conversation history for one user in one domain — used by the web console to restore sessions after reload. Messages are returned oldest-first.
 
 | Param | Type | Required | Description |
 |---|---|---|---|
 | user_id | string | Yes | User identifier |
 | domain | string | Yes | Domain name |
-| limit | int | No (50) | Max records, capped at 200 |
+| limit | int | No (50) | Page size, 1–200 — the **most recent** N messages |
+| before_id | int | No | Return messages older than this id (load previous page) |
 
 ```json
 [
@@ -235,7 +293,8 @@ Get recent audit logs (Python-side view).
 
 | Param | Type | Default | Description |
 |---|---|---|---|
-| limit | int | 20 | Max number of records (max 100) |
+| limit | int | 20 | Page size, 1–100 |
+| offset | int | 0 | Rows to skip |
 
 ### Response
 
@@ -263,33 +322,34 @@ Liveness/readiness probe — also verifies database connectivity.
 {
   "status": "ok",
   "service": "ai-service",
-  "database": "up"
+  "database": "up",
+  "auth": "enabled",
+  "llm_provider": "openai"
 }
 ```
 
-Returns `status: "degraded"` and `database: "down"` when the database is unreachable.
+Returns `status: "degraded"` and `database: "down"` when the database is
+unreachable. `auth` is `enabled` when `API_KEY` is set, `disabled` in
+development mode. This endpoint never requires an API key — it is the
+container health probe.
 
 ---
 
 ## Error Format
 
-Validation errors return HTTP 422:
+| Status | Body | Cause |
+|---|---|---|
+| 401 | `{"detail": "Invalid or missing API key"}` | `API_KEY` configured, key missing/wrong |
+| 413 | `{"detail": "File exceeds 50 MB limit"}` | Upload too large |
+| 422 | `{"error": "validation_error", "detail": [...], "path": ...}` | Body/query validation failed |
+| 429 | `{"error": "rate_limit_exceeded", ...}` + `Retry-After` | Rate limit exceeded |
+| 500 | `{"error": "internal_error", "detail": "Internal server error", "path": ...}` | Unhandled failure — internal details are never leaked |
 
 ```json
 {
   "error": "validation_error",
   "detail": [ ... pydantic error entries ... ],
   "path": "/api/v1/domains"
-}
-```
-
-Unhandled failures return HTTP 500 with a generic message so internal details are not leaked:
-
-```json
-{
-  "error": "internal_error",
-  "detail": "Internal server error",
-  "path": "/api/v1/chat"
 }
 ```
 
@@ -312,4 +372,5 @@ The built-in UI is served by the AI service at `http://localhost:8000/web/index.
 - domain switching and custom domain creation
 - per-domain document upload / delete
 - conversation history restored from the database on reload
-- reflection-loop indicator on assistant answers
+- reflection-loop and multi-turn context indicators on assistant answers
+- API key entry (stored in `localStorage`, prompted automatically on `401`)

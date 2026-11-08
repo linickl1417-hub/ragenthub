@@ -3,25 +3,38 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from app.core.db import get_db, ChatHistory
+from app.core.security import require_api_key
 
-router = APIRouter(prefix="/api/v1/chat", tags=["history"])
+router = APIRouter(
+    prefix="/api/v1/chat",
+    tags=["history"],
+    dependencies=[Depends(require_api_key)],
+)
 
 
 @router.get("/history")
 def get_chat_history(
     user_id: str = Query(...),
     domain: str = Query(...),
-    limit: int = Query(50, le=200),
+    limit: int = Query(50, ge=1, le=200),
+    before_id: int | None = Query(None, description="Return messages older than this id"),
     db: Session = Depends(get_db),
 ):
-    """Get chat history for a user in a specific domain"""
-    rows = (
-        db.query(ChatHistory)
-        .filter(ChatHistory.user_id == user_id, ChatHistory.domain == domain)
-        .order_by(ChatHistory.created_at.asc())
-        .limit(limit)
-        .all()
+    """Most recent messages for a user in a domain, returned in chronological order.
+
+    Pass ``before_id`` with the oldest id of the previous page to load older
+    messages (backwards pagination).
+    """
+    q = db.query(ChatHistory).filter(
+        ChatHistory.user_id == user_id,
+        ChatHistory.domain == domain,
     )
+    if before_id is not None:
+        q = q.filter(ChatHistory.id < before_id)
+
+    rows = q.order_by(ChatHistory.id.desc()).limit(limit).all()
+    rows.reverse()  # oldest first for display
+
     return [
         {
             "id": r.id,

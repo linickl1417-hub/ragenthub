@@ -8,6 +8,7 @@ from app.config import settings
 class _MemoryCache:
     def __init__(self):
         self._store: dict[str, tuple[float, str]] = {}
+        self._counters: dict[str, tuple[float, int]] = {}
 
     def get(self, key: str):
         item = self._store.get(key)
@@ -22,6 +23,19 @@ class _MemoryCache:
     def set(self, key: str, value, ttl: int = 300):
         self._store[key] = (time.time() + ttl, json.dumps(value, ensure_ascii=False))
 
+    def incr(self, key: str, ttl: int = 60) -> int:
+        """Atomic-enough counter used by the rate limiter."""
+        expire_at, count = self._counters.get(key, (0, 0))
+        if expire_at < time.time():
+            expire_at, count = time.time() + ttl, 0
+        count += 1
+        self._counters[key] = (expire_at, count)
+        return count
+
+    def ttl(self, key: str) -> int:
+        expire_at, _ = self._counters.get(key, (0, 0))
+        return max(0, int(expire_at - time.time()))
+
 
 class _RedisCache:
     def __init__(self, url: str):
@@ -34,6 +48,20 @@ class _RedisCache:
 
     def set(self, key: str, value, ttl: int = 300):
         self._r.set(key, json.dumps(value, ensure_ascii=False), ex=ttl)
+
+    def incr(self, key: str, ttl: int = 60) -> int:
+        pipe = self._r.pipeline()
+        pipe.incr(key)
+        pipe.ttl(key)
+        value, remaining = pipe.execute()
+        if remaining < 0:  # first hit: no expiry yet
+            self._r.expire(key, ttl)
+            remaining = ttl
+        self._last_ttl = remaining
+        return int(value)
+
+    def ttl(self, key: str) -> int:
+        return int(self._r.ttl(key))
 
 
 _singleton = None

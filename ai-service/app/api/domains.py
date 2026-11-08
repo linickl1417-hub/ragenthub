@@ -6,8 +6,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from app.core.db import get_db, DomainConfig
+from app.core.security import require_api_key
 
-router = APIRouter(prefix="/api/v1/domains", tags=["domains"])
+router = APIRouter(
+    prefix="/api/v1/domains",
+    tags=["domains"],
+    dependencies=[Depends(require_api_key)],
+)
 
 _DOMAIN_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 

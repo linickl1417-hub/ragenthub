@@ -14,6 +14,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.core.db import init_db, engine
+from app.core.security import caller_identity, check_rate_limit, is_open_path
 from app.api import chat, documents, domains, history
 
 # ---------- Logging ----------
@@ -46,9 +47,35 @@ app = FastAPI(
 
 
 # ---------- Middleware ----------
+# Registration order matters: the last added middleware is the outermost one.
+# CORS is registered last so that rate-limited (429) responses still carry the
+# CORS headers a browser client needs.
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    if not is_open_path(request.url.path):
+        allowed, retry_after = check_rate_limit(caller_identity(request))
+        if not allowed:
+            logger.warning(
+                "Rate limit exceeded for %s on %s", caller_identity(request), request.url.path
+            )
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": "rate_limit_exceeded",
+                    "detail": f"Too many requests, retry in {retry_after}s",
+                    "path": request.url.path,
+                },
+                headers={"Retry-After": str(retry_after)},
+            )
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["Retry-After"],
 )
 
 
@@ -103,7 +130,13 @@ def health():
         logger.warning("Health check: database unreachable")
 
     status = "ok" if db_ok else "degraded"
-    return {"status": status, "service": "ai-service", "database": "up" if db_ok else "down"}
+    return {
+        "status": status,
+        "service": "ai-service",
+        "database": "up" if db_ok else "down",
+        "auth": "enabled" if settings.api_key else "disabled",
+        "llm_provider": settings.llm_provider,
+    }
 
 
 # ---------- Routers ----------

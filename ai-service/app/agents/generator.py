@@ -4,6 +4,13 @@ import httpx
 from app.agents.base import BaseAgent, AgentContext
 from app.config import settings
 
+SYSTEM_SUFFIX = (
+    "\n\n回答规则：\n"
+    "1. 只依据【参考资料】作答，资料不足时明确说明「资料中未提及」，不要编造。\n"
+    "2. 结合【对话历史】理解省略与指代（例如「它」「这个」指的是上一轮的对象）。\n"
+    "3. 答案简洁，中文提问用中文作答，英文提问用英文作答。"
+)
+
 
 def _mock_generate(ctx: AgentContext) -> str:
     """无 LLM key 时的兜底：直接基于检索片段组装答案，便于本地演示"""
@@ -21,17 +28,26 @@ def _mock_generate(ctx: AgentContext) -> str:
     )
 
 
-async def _openai_generate(ctx: AgentContext, prompt: str) -> str:
-    async with httpx.AsyncClient(timeout=30) as client:
+def _build_messages(ctx: AgentContext, prompt: str) -> list[dict]:
+    """system + conversation history + current grounded question."""
+    messages = [
+        {"role": "system", "content": (ctx.domain_cfg.get("system_prompt") or "") + SYSTEM_SUFFIX}
+    ]
+    for m in ctx.extra.get("history") or []:
+        if m.get("role") in ("user", "assistant") and m.get("content"):
+            messages.append({"role": m["role"], "content": m["content"]})
+    messages.append({"role": "user", "content": prompt})
+    return messages
+
+
+async def _openai_generate(messages: list[dict]) -> str:
+    async with httpx.AsyncClient(timeout=60) as client:
         r = await client.post(
             f"{settings.openai_base_url}/chat/completions",
             headers={"Authorization": f"Bearer {settings.openai_api_key}"},
             json={
                 "model": settings.openai_model,
-                "messages": [
-                    {"role": "system", "content": ctx.domain_cfg["system_prompt"]},
-                    {"role": "user", "content": prompt},
-                ],
+                "messages": messages,
                 "temperature": 0.2,
             },
         )
@@ -43,6 +59,9 @@ class GeneratorAgent(BaseAgent):
     name = "generator"
 
     async def run(self, ctx: AgentContext) -> AgentContext:
+        history = ctx.extra.get("history") or []
+        ctx.extra["context_turns"] = sum(1 for m in history if m.get("role") == "user")
+
         if ctx.guard_action == "denied":
             return ctx  # 已被拒答，不进生成
 
@@ -58,10 +77,11 @@ class GeneratorAgent(BaseAgent):
 
         if settings.llm_provider == "openai" and settings.openai_api_key:
             try:
-                ctx.answer = await _openai_generate(ctx, prompt)
+                ctx.answer = await _openai_generate(_build_messages(ctx, prompt))
                 ctx.extra["llm_provider"] = "openai"
             except Exception as e:  # noqa: BLE001
                 ctx.answer = _mock_generate(ctx) + f"\n\n[LLM 调用失败已回退 Mock: {e}]"
+                ctx.extra["llm_provider"] = "mock(fallback)"
         else:
             ctx.answer = _mock_generate(ctx)
             ctx.extra["llm_provider"] = "mock"

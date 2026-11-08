@@ -4,15 +4,20 @@ import logging
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Response, Query
 from sqlalchemy.orm import Session
 
 from app.core.events import get_event_bus
 from app.core.db import get_db, DocumentMeta
+from app.core.security import require_api_key
 from app.core.vectorstore import delete_document_chunks
 from app.models.schemas import DocumentIngestResponse
 
-router = APIRouter(prefix="/api/v1", tags=["documents"])
+router = APIRouter(
+    prefix="/api/v1",
+    tags=["documents"],
+    dependencies=[Depends(require_api_key)],
+)
 logger = logging.getLogger(__name__)
 
 ALLOWED_SUFFIXES = {".md", ".txt", ".pdf"}
@@ -68,12 +73,29 @@ async def upload_document(
 
 
 @router.get("/documents")
-def list_documents(db: Session = Depends(get_db), domain: str | None = None):
-    """List ingested documents, optionally filtered by domain."""
+def list_documents(
+    response: Response,
+    db: Session = Depends(get_db),
+    domain: str | None = None,
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """List ingested documents, optionally filtered by domain.
+
+    Total row count is returned in the ``X-Total-Count`` header so clients can
+    paginate without a second request.
+    """
     q = db.query(DocumentMeta)
     if domain:
         q = q.filter(DocumentMeta.domain == domain)
-    rows = q.order_by(DocumentMeta.uploaded_at.desc()).all()
+
+    response.headers["X-Total-Count"] = str(q.count())
+    rows = (
+        q.order_by(DocumentMeta.uploaded_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
     return [
         {
             "id": r.id,

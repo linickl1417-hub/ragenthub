@@ -22,7 +22,8 @@ RAGentHub is a **RAG + Agent backend template** built for portfolio and producti
 | 🤖 **Multi-Agent Orchestration** | `RetrieverAgent` / `GuardianAgent` / `GeneratorAgent` / `AuditorAgent` — four-role collaboration |
 | 🧭 **Runtime Domain Management** | Create, update and delete domains from the console — persisted in PostgreSQL, no redeploy needed |
 | 💬 **Persistent Conversations** | Per-user, per-domain chat history stored in the database and restored on reload |
-| 🔐 **Data Governance / Security** | RBAC, document-level domain isolation, PII regex masking (phone/ID/bank card), full audit log |
+| 🧠 **Multi-Turn Conversation** | Previous turns are fed back into the prompt, and pronoun-based follow-ups ("它呢？") are folded into the retrieval query |
+| 🔐 **Access Control** | API-key authentication (`X-API-Key` / Bearer), per-caller rate limiting backed by Redis, domain isolation, PII regex masking, full audit log |
 | 🧩 **Dual-Language Microservices** | Java Spring Boot 3 primary service + Python FastAPI AI service, decoupled via HTTP |
 | 📦 **Zero-Dependency Local Run** | Default SQLite + embedded Chroma, no MySQL / Redis / Kafka required; production configs can be switched to PostgreSQL + Redis + Kafka with one env var |
 | 🗄 **Durable Storage** | Chroma vectors live on a named volume, ONNX embedding cache is seeded from a local model mount — data survives container recreation |
@@ -162,7 +163,32 @@ curl -X POST http://localhost:8000/api/v1/documents \
 curl http://localhost:8000/api/v1/audit/recent
 ```
 
-See [docs/api.md](docs/api.md) for full API reference.
+When `API_KEY` is configured, add the header to every `/api/v1/*` call:
+
+```bash
+curl -H "X-API-Key: $API_KEY" http://localhost:8000/api/v1/domains
+# or: -H "Authorization: Bearer $API_KEY"
+```
+
+See [docs/api.md](docs/api.md) for the full API reference.
+
+---
+
+## 🔐 Security Model
+
+| Layer | Implementation | Control |
+|---|---|---|
+| Authentication | `X-API-Key` header or `Authorization: Bearer`, constant-time compare | `API_KEY` (empty = dev mode) |
+| Rate limiting | Fixed one-minute window per key/IP, shared through Redis so the budget holds across replicas | `RATE_LIMIT_PER_MINUTE` (0 = off) |
+| Tenant isolation | Documents, vectors and conversations are namespaced by `domain` | — |
+| PII protection | GuardianAgent masks phone / ID card / bank card on input **and** output | — |
+| Refusal policy | `deny_topics` short-keyword matching, refuses before generation | `config/domain.yaml` |
+| Traceability | Every answer writes `audit_log`; conversations write `chat_history` | — |
+
+`/health`, `/docs` and `/web` stay open so probes and the UI work without a key.
+
+> Deployment note: the API key travels in a header, so terminate TLS in front of
+> the service (nginx / ingress) in any environment that is not localhost.
 
 ---
 

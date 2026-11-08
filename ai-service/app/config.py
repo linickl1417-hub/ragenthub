@@ -43,6 +43,18 @@ class Settings(BaseSettings):
     openai_base_url: str = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
+    # 接入安全：为空表示开发模式（不校验）。生产必须设置。
+    api_key: str = os.getenv("API_KEY", "")
+
+    # 限流：每分钟每调用方允许的请求数，0 表示关闭
+    rate_limit_per_minute: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "120"))
+
+    # 多轮对话：带入历史轮数（一问一答算一轮）
+    chat_context_turns: int = int(os.getenv("CHAT_CONTEXT_TURNS", "3"))
+
+    # 单轮历史最大字符数，控制 prompt 体积
+    chat_context_max_chars: int = int(os.getenv("CHAT_CONTEXT_MAX_CHARS", "500"))
+
     model_config = {"env_file": ".env"}
 
 

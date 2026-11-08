@@ -100,6 +100,14 @@
       <h3>History</h3>
       <div id="historyList" style="font-size: 12px; color: #718096;">No history yet</div>
     </div>
+
+    <div class="sidebar-section">
+      <h3>Access</h3>
+      <div style="font-size:12px;color:#718096;margin-bottom:6px;">
+        API key <span id="keyState"></span>
+      </div>
+      <button onclick="promptApiKey()" style="width:100%;padding:6px;background:#f7fafc;border:1px dashed #cbd5e0;border-radius:6px;cursor:pointer;font-size:12px;color:#4a5568;">Set API key</button>
+    </div>
   </div>
 
   <!-- Main chat area -->
@@ -144,14 +152,44 @@ const API = 'http://localhost:8000';
 let currentDomain = 'medical';
 let currentUserId = 'web-user';
 let allDomains = {};
+let apiKey = localStorage.getItem('ragenthub_api_key') || '';
 
 const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, ch => HTML_ESCAPES[ch]);
 }
 
-async function request(url, options) {
-  const res = await fetch(url, options);
+function renderKeyState() {
+  const el = document.getElementById('keyState');
+  if (el) el.textContent = apiKey ? '(configured)' : '(not set)';
+}
+
+function promptApiKey() {
+  const entered = window.prompt('API key required by this service (leave empty to clear):', apiKey);
+  if (entered === null) return;
+  apiKey = entered.trim();
+  if (apiKey) localStorage.setItem('ragenthub_api_key', apiKey);
+  else localStorage.removeItem('ragenthub_api_key');
+  renderKeyState();
+  loadDomains();
+}
+
+async function request(url, options = {}, allowRetry = true) {
+  const headers = new Headers(options.headers || {});
+  if (apiKey) headers.set('X-API-Key', apiKey);
+
+  const res = await fetch(url, { ...options, headers });
+
+  if (res.status === 401 && allowRetry) {
+    const entered = window.prompt('This API requires an API key:');
+    if (entered && entered.trim()) {
+      apiKey = entered.trim();
+      localStorage.setItem('ragenthub_api_key', apiKey);
+      renderKeyState();
+      return request(url, options, false);
+    }
+  }
+
   if (!res.ok) {
     let detail = `${res.status} ${res.statusText}`;
     try {
@@ -166,6 +204,7 @@ async function request(url, options) {
 }
 
 async function init() {
+  renderKeyState();
   await loadDomains();
   await loadChatHistory();
   await Promise.all([loadDocs(), loadRecentAudits()]);
@@ -237,8 +276,10 @@ function messageHtml(m) {
   } catch (_) { /* ignore malformed payload */ }
   const reflectionHtml = (m.reflection_rounds || 0) > 0
     ? `<div class="reflection">🔄 Reflection loop triggered (round ${m.reflection_rounds})</div>` : '';
+  const contextHtml = (m.context_turns || 0) > 0
+    ? `<div class="reflection">🧠 Using ${m.context_turns} previous turn(s)</div>` : '';
   const time = m.created_at ? new Date(m.created_at).toLocaleTimeString() : '';
-  return `<div class="message ${role}">${escapeHtml(m.content)}${citationsHtml}${reflectionHtml}<div class="meta">${escapeHtml(time)}</div></div>`;
+  return `<div class="message ${role}">${escapeHtml(m.content)}${citationsHtml}${reflectionHtml}${contextHtml}<div class="meta">${escapeHtml(time)}</div></div>`;
 }
 
 async function sendQuestion() {
@@ -265,6 +306,7 @@ async function sendQuestion() {
       content: data.answer,
       citations: JSON.stringify(data.citations || []),
       reflection_rounds: data.agent_trace?.reflection_rounds || 0,
+      context_turns: data.agent_trace?.context_turns || 0,
     }));
     container.scrollTop = container.scrollHeight;
     loadRecentAudits();
